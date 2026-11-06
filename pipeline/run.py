@@ -441,6 +441,7 @@ def main(src, out):
                           "recall_first": float(wflag[first_te].mean()),
                           "recall_follow": float(wflag[~first_te].mean()) if (~first_te).any() else None,
                           "fa_per_shift_test": float((len(starts) - true.sum()) / shifts_te),
+                          "on_share_test": float(above.sum() / (te & el20).sum()),
                           "lead_min_median": float(np.median(lw)) if len(lw) else None}
         # the surviving single-sensor rule at its fixed threshold (no tuning)
         x6 = fires[top_det["id"]] & te & el20
@@ -449,6 +450,7 @@ def main(src, out):
         rows[top_det["id"] + " (fixed)"] = {"recall_breaks": float(wflag.mean()), "warned_breaks": int(wflag.sum()),
                                            "recall_first": float(wflag[first_te].mean()),
                                            "fa_per_shift_test": float((len(st_) - tr_.sum()) / shifts_te),
+                                           "on_share_test": float(x6.sum() / (te & el20).sum()),
                                            "lead_min_median": float(np.median(lead[wflag] * 2)) if wflag.any() else None}
         events["targets"][str(target)] = rows
     print("event-level", json.dumps(events["targets"]["1.0"]))

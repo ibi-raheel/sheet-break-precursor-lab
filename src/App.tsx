@@ -28,7 +28,7 @@ export default function App() {
 
       <section>
         <h2>2 · Which detectors survive the permutation null?</h2>
-        <p>{r.detectors.length} single-signal rules, thresholds set on earlier weeks only, scored on {m.eval_breaks} breaks with {m.permutations.toLocaleString()} permutations and Benjamini-Hochberg. {r.union.n_detectors} survive{r.union.n_detectors === 1 ? 's' : ''} at q &lt; {m.alpha}.</p>
+        <p>{r.detectors.length} single-signal rules, thresholds set on earlier weeks only, scored on {m.eval_breaks} breaks with {m.permutations.toLocaleString()} permutations and Benjamini-Hochberg. {r.union.n_detectors} survive{r.union.n_detectors === 1 ? 's' : ''} at q &lt; {m.alpha}. Breaks cluster, so each rule is also scored once per episode ({r.episode_level.eval_episodes} episodes): {r.episode_level.survivors} survive at that level.</p>
         <table>
           <thead><tr><th>Detector</th><th>Fires</th><th>Coverage</th><th>Lift</th><th>q</th><th>False alarms / day</th></tr></thead>
           <tbody>{dets.map((d) => (

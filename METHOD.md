@@ -8,7 +8,7 @@ Rare-event precursor analysis on a real paper-machine sheet-break dataset. All n
 - **Licence:** CC BY-NC-SA 4.0. This repo is non-commercial; the raw CSV is not redistributed here (see `DATA.md` for how to obtain it). Derived results in `src/data/` are shared under the same licence.
 - **Shape (measured):** 18,398 rows, 1999-05-01 00:00 to 1999-05-29 00:06, nominal 2-minute sampling, 59 continuous anonymised sensors, one 8-level categorical (`x28`, treated as a grade code and one-hot encoded) and one binary (`x61`).
 - **Events:** 124 rows with `y = 1`. Every one is an isolated row, so 124 break events (consecutive `y = 1` rows would be merged into one event). Break rows are 0.674% of all rows.
-- **Gaps:** 107 timestamps are more than 2 minutes after the previous one. 103 of them start within 2 rows after a break: they are post-break downtime the publishers cut out (measured in section 10). Rolling features are defined in rows, not clock time; this is an assumption.
+- **Gaps:** 107 timestamps are more than 2 minutes after the previous one. 103 of them start within 2 rows after a break. They are read here as post-break downtime removed from the record (section 10); this is an interpretation, since the dataset does not label the gaps. Rolling features are defined in rows, not clock time; this is an assumption.
 - The whole dataset is used. No subsetting.
 
 ## 2. Labels and restart masking
@@ -37,7 +37,7 @@ Every feature at row *t* uses rows ≤ *t* only. `tests/test_pipeline.py::test_f
 
 ## 4. Models across horizons
 
-- **Split:** time-blocked, no shuffling. First 75% of rows (to 1999-05-22 06:02) train, last 25% (about 6.8 days, 33 breaks) test.
+- **Split:** time-blocked, no shuffling. First 75% of rows (to 1999-05-22 06:02) train, last 25% (about 6.8 days, 38 breaks) test. 5 of the 38 fall inside the restart mask of the previous break, so PR-AUC at the 2-minute horizon scores 33 of them.
 - **Gradient boosting:** LightGBM, 250 trees, 15 leaves, class weight = negatives / positives, 2 threads.
 - **Logistic regression:** standardised features, L2 (C = 0.05), balanced classes.
 - **Baselines:** prevalence (PR-AUC of a random score equals the positive rate), persistence (score = minus rows since the last break, i.e. "breaks cluster"), and two fitted break-hazard models that use no sensor data at all (section 9): a Weibull renewal model and a self-exciting (Hawkes) model, both fitted on train weeks only and scored from past break times only.
@@ -72,7 +72,7 @@ Reading: skill over prevalence is small in absolute terms at every horizon. The 
 | Hawkes hazard | 0.036 | **0.233** |
 | Persistence | 0.031 | 0.137 |
 
-Follow-on breaks are a restart-stability problem that break timing alone predicts well (Hawkes 7× prevalence). First breaks of an episode are the hard, valuable problem: hazard models are below prevalence there by construction, and the only score above prevalence is the sensor GBM, at 1.36×. That is where sensor data has to earn its place. Adding time-since-break to the GBM does not help first breaks.
+Follow-on breaks are a restart-stability problem that break timing alone predicts well (Hawkes 7× prevalence). First breaks of an episode are the hard, valuable problem: hazard models are below prevalence there by construction, and the only score above prevalence is the sensor GBM, at 1.36×. This rests on 19 first-in-episode test breaks and has no confidence interval, so it is a lead, not an established result. If it holds on more data, that is where sensor data has to earn its place. Adding time-since-break to the GBM does not help first breaks.
 
 **Importance:** TreeSHAP contributions (LightGBM `pred_contrib`) on the 20-minute model, mean |SHAP| over test rows, summed over all features derived from each raw signal.
 
@@ -126,8 +126,8 @@ A detector **survives** when q < 0.05 and lift > 1.
 |---|---|---|
 | Lift / precision hand calculation | equal | 9.763 = 9.763 (unit test) |
 | Null calibration: independent fake break times (20 runs, real nominal windows, same detectors) | ~0 survivors; ≤5% of p below 0.05 | 0 survivors in all 20 runs; 3.1% of p < 0.05 |
-| **Clustered** null calibration: shift whole real episodes, spacing kept, to random nominal positions in their block (20 runs) | an honest test gives ~0 survivors | break-level (independent) test: **7 false survivors in 1 of 20 runs**, 4.7% of p < 0.05. Episode test: 0 survivors in 20 of 20 runs, 3.3% of p < 0.05 |
-| Weibull fit vs empirical CDF of inter-break times | KS not rejected | KS D = 0.105, p = 0.29 (exponential: D = 0.156, p = 0.03, rejected) |
+| **Clustered** null calibration: shift whole real episodes, spacing kept, to random nominal positions in their block (20 runs) | an honest test gives ~0 survivors | break-level (independent) test: **7 false survivors in 1 of 20 runs**, 4.7% of p < 0.05. Episode test: 0 survivors in 20 of 20 runs, 3.3% of p < 0.05. Note: 1 run in 20 with a false survivor is within what BH at 0.05 allows under a complete null, so this does not show the break-level test is miscalibrated; it shows that when it fails under clustering it fails in bulk. 20 runs cannot separate the two tests' error rates. |
+| Weibull fit vs empirical CDF of inter-break times | KS not rejected | KS D = 0.105, p = 0.29 (exponential: D = 0.156, p = 0.03, rejected). Parameters are fitted on the same intervals, so these KS p-values are optimistic (Lilliefors effect): the exponential rejection holds a fortiori, the Weibull "not rejected" is weaker than p = 0.29 suggests |
 | Hawkes stationarity | branching ratio α/β < 1 | 0.40 |
 | Downtime extraction | equals hand count | 130, 24, 2 min on the first 3 breaks (unit test against the raw CSV) |
 | Event-level alarm logic, break-even, Hawkes log-likelihood, Weibull MLE | hand calculations / simulated recovery | unit tests (`tests/test_reliability.py`); Weibull MLE recovers k = 0.8 on 20,000 draws, Hawkes fit recovers branching 0.5 on a simulated process |
@@ -160,8 +160,8 @@ On the 86 training breaks (85 inter-break times τ, clock minutes; the interval 
 
       ℓ = Σ_{i≥2} log λ(t_i) − μ(T − t₁) − (α/β) Σ_i (1 − e^(−β(T − t_i)))
 
-  MLE μ = 0.0017/min (one background break per 10 h), branching ratio α/β = **0.40** (40% of breaks are triggered by an earlier break), excitation half-life ln2/β = 204 min.
-- **AIC:** exponential 1169.7, Weibull 1168.9, Hawkes **1160.3**. Self-excitation is the best description of how breaks arrive.
+  MLE μ = 0.0017/min (one background break per 10 h), branching ratio α/β = **0.40** (in a stationary Hawkes process, the expected share of breaks triggered by an earlier break; point estimate on 86 breaks, no CI computed), excitation half-life ln2/β = 204 min.
+- **AIC:** exponential 1169.7, Weibull 1168.9, Hawkes **1160.3**. Of these three models, self-excitation describes how breaks arrive best (ΔAIC ≈ 9).
 
 **Scores.** At row *t*, P(break in (t, t+h]) is `1 − S(s+h)/S(s)` for the Weibull model (s = minutes since the last break) and `1 − exp(−[μh + (α/β) E(t)(1 − e^(−βh))])` with `E(t) = Σ_{t_j ≤ t} e^(−β(t − t_j))` for Hawkes. Both use past break times only.
 
@@ -169,18 +169,22 @@ On the 86 training breaks (85 inter-break times τ, clock minutes; the interval 
 
 ## 10. Downtime and alarm economics
 
-**Measured downtime.** For each break, downtime = the first timestamp gap within 2 rows after the onset, minus the nominal 2 minutes. 103 of 124 breaks are followed by such a gap (103 of the 107 gaps in the file). Median 14 min when present (IQR 8 to 30), mean **20.3 min per break** over all breaks, **41.9 hours in total** over 28 days: 1.5 line-hours a day, 6.2% of calendar time. First breaks of an episode cost more (23.2 min) than follow-ons (16.7 min).
+**Downtime (estimated from timestamp gaps).** Assumption: a timestamp gap right after a break is the line being down and the rows removed from the record. The data does not label this. For each break, downtime = the first timestamp gap within 2 rows after the onset, minus the nominal 2 minutes. 103 of 124 breaks are followed by such a gap (103 of the 107 gaps in the file). Median 14 min when present (IQR 8 to 30), mean **20.3 min per break** over all breaks, **41.9 hours in total** over 28 days: 1.5 line-hours a day, 6.2% of calendar time. First breaks of an episode cost more (23.2 min) than follow-ons (16.7 min).
 
 **Event-level alarms.** Each score's threshold is set on the train weeks to give 0.5, 1 or 2 false alarms per 8-hour operating shift (GBM thresholds from blocked 3-fold out-of-fold scores, so the threshold is not set on in-sample fits). An alarm is a rising edge of score > threshold; it is true if a break follows within 20 minutes. A break counts as **warned** if the alarm is on between 20 and 10 minutes before it (≥ 10 minutes of lead time). Results on the 38 test breaks (19 episodes), target 1 false alarm per shift:
 
-| Score | Breaks warned | First-in-episode | Follow-on | Realised false alarms / shift (test) | Median lead |
-|---|---|---|---|---|---|
-| GBM | 5 / 38 (13%) | 2 / 19 | 3 / 19 | 1.5 | 14 min |
-| GBM + time since break | 4 / 38 (11%) | 1 / 19 | 3 / 19 | 1.6 | 18 min |
-| Hawkes hazard (no sensors) | **21 / 38 (55%)** | 3 / 19 | **18 / 19** | 1.6 | 20 min |
-| `x6` level rule (fixed threshold) | 9 / 38 (24%) | 1 / 19 | 8 / 19 | 0.8 | 20 min |
+| Score | Breaks warned | First-in-episode | Follow-on | Realised false alarms / shift (test) | Alarm on, share of operating time (test) | Median lead |
+|---|---|---|---|---|---|---|
+| GBM | 5 / 38 (13%) | 2 / 19 | 3 / 19 | 1.5 | 2.6% | 14 min |
+| GBM + time since break | 4 / 38 (11%) | 1 / 19 | 3 / 19 | 1.6 | 3.0% | 18 min |
+| Hawkes hazard (no sensors) | **21 / 38 (55%)** | 3 / 19 | **18 / 19** | 1.6 | 29.5% | 20 min |
+| `x6` level rule (fixed threshold)* | 9 / 38 (24%) | 1 / 19 | 8 / 19 | 0.8 | 3.3% | 20 min |
 
-At 2 false alarms per shift the Hawkes score warns 28 of 38 (74%), the GBM 8 of 38. Thresholds drift: a target of 1 per shift on train weeks became 1.5 to 1.6 per shift on test weeks.
+**Read with care.** False alarms are counted as rising edges, so an alarm that stays on for hours counts once. At the same false-alarm count the Hawkes alarm is on for 29.5% of operating time and the GBM for 2.6%. Per unit of alarm-on time the GBM warns more breaks (13% recall from 2.6% on-time, against 55% from 29.5%). Which score is "better" depends on whether an operator's cost scales with alarm count or alarm duration. That is not measured here.
+
+\* `x6` level was chosen as the top rule by rolling-origin scoring that includes the test weeks, and all 9 of its warned test breaks fall in the single 24–25 May episode (14:54 to 00:46) that made it the top rule. Its threshold is out of sample but its selection is not, so this row is optimistic.
+
+At 2 false alarms per shift the Hawkes score warns 28 of 38 (74%), the GBM 8 of 38, but the Hawkes alarm is then on for 64% of operating time (GBM 4.4%). Thresholds drift: a target of 1 per shift on train weeks became 1.5 to 1.6 per shift on test weeks.
 
 **Break-even.** With *e* = the share of warned breaks an operator actually prevents (not measurable from this data):
 
@@ -192,17 +196,17 @@ Inputs: 5.6 breaks/day (test weeks), 20.3 min per break (measured), 5 min per al
 | Score | Break-even e | Net line-hours / month at e = 10% | 25% | 50% |
 |---|---|---|---|---|
 | GBM | 1.50 (never pays) | −10.5 | −9.4 | −7.5 |
-| Hawkes watch window | 0.38 | −9.0 | −4.2 | **+3.7** |
-| `x6` level rule | 0.43 | −4.5 | −2.5 | +0.9 |
+| Hawkes hazard alarm | 0.38 | −9.0 | −4.2 | **+3.7** |
+| `x6` level rule* | 0.43 | −4.5 | −2.5 | +0.9 |
 
-No score pays for itself unless operators can stop a large share of the breaks they are warned about. The sensor GBM never does at this alarm budget. Line-hours convert to money at the plant's own cost per hour; no dollar figure is assumed here.
+No score pays for itself unless operators can stop a large share of the breaks they are warned about. Under this cost model (5 minutes per alarm, regardless of how long it stays on) the sensor GBM never does at this alarm budget. The cost model favours the Hawkes alarm, which is on 11 times longer than the GBM's (see above). If check cost scales with alarm-on time, the ranking may change; that variant is not computed. The `x6` row is optimistic (see the note above). Line-hours convert to money at the plant's own cost per hour; no dollar figure is assumed here.
 
 ## 11. Week 1 on a new line
 
 What these numbers say a forward-deployed data scientist should do first:
 
 1. **Day 1: measure the cost and the clustering from the historian.** Post-break downtime per break (here 20 min, 1.5 h/day) and the break hazard (here k = 0.87, branching 0.40). This sizes the prize before any model.
-2. **Deploy the post-restart watch window as a zero-ML rule.** Here: after any break, run with extra attention for 105 minutes. On test weeks a hazard-based alarm caught 18 of 19 follow-on breaks at about 1.6 false alarms per shift.
+2. **Trial a post-restart watch window as a zero-ML rule.** Here: after any break, run with extra attention for 105 minutes (the train-week 90th percentile of follow-on spacing). The fixed window itself was not scored on test weeks. The closest scored rule, the Hawkes hazard alarm, caught 18 of 19 test follow-on breaks at about 1.6 false alarms per shift, while staying on for 30% of operating time. Measure what the extra attention costs before rolling it out.
 3. **Screen detectors on first-in-episode breaks only, with an episode-aware null.** Break-level screening produced a survivor that is one bad evening; the clustered calibration shows the break-level test can produce 7 false survivors in a run.
 4. **Bring the top episode-level candidates (here `x51` level, `x26`/`x16`/`x13` deviation) to the process engineer** to name the signals and confirm on the floor, then trial one with a stated false-alarm budget and a measured *e*.
 
