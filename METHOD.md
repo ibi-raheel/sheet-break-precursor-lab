@@ -1,6 +1,6 @@
 # Method
 
-Rare-event precursor analysis on a real paper-machine sheet-break dataset. All numbers below are produced by `pipeline/run.py` and exported to `src/data/results.json`; nothing is hand-entered.
+Rare-event precursor analysis on a real paper-machine sheet-break dataset. All numbers below are produced by `pipeline/run.py` and `pipeline/hybrid_run.py` (section 12) and exported to `src/data/results.json`; nothing is hand-entered.
 
 ## 1. Data
 
@@ -72,7 +72,7 @@ Reading: skill over prevalence is small in absolute terms at every horizon. The 
 | Hawkes hazard | 0.036 | **0.233** |
 | Persistence | 0.031 | 0.137 |
 
-Follow-on breaks are a restart-stability problem that break timing alone predicts well (Hawkes 7× prevalence). First breaks of an episode are the hard, valuable problem: hazard models are below prevalence there by construction, and the only score above prevalence is the sensor GBM, at 1.36×. This rests on 19 first-in-episode test breaks and has no confidence interval, so it is a lead, not an established result. If it holds on more data, that is where sensor data has to earn its place. Adding time-since-break to the GBM does not help first breaks.
+Follow-on breaks are a restart-stability problem that break timing alone predicts well (Hawkes 7× prevalence). First breaks of an episode are the hard, valuable problem: hazard models are below prevalence there by construction, and the only score above prevalence is the sensor GBM, at 1.36×. This rests on 19 first-in-episode test breaks and has no confidence interval here; section 12 re-tests it on 53 first breaks with forward-chaining folds and bootstrap CIs, where it holds. Adding time-since-break to the GBM does not help first breaks.
 
 **Importance:** TreeSHAP contributions (LightGBM `pred_contrib`) on the 20-minute model, mean |SHAP| over test rows, summed over all features derived from each raw signal.
 
@@ -136,7 +136,7 @@ A detector **survives** when q < 0.05 and lift > 1.
 | BH implementation | equals `scipy.stats.false_discovery_control` | unit test |
 | Past-only features and labels | future edits do not change past rows | unit tests |
 
-`pytest -q tests`: 25 passed.
+`pytest -q tests`: 32 passed (25 here plus 7 for section 12 in `tests/test_hybrid.py`, including a hand-worked matched-budget alarm, warning and false-alarm example).
 
 ## 8. Assumptions and limitations
 
@@ -207,8 +207,85 @@ What these numbers say a forward-deployed data scientist should do first:
 
 1. **Day 1: measure the cost and the clustering from the historian.** Post-break downtime per break (here 20 min, 1.5 h/day) and the break hazard (here k = 0.87, branching 0.40). This sizes the prize before any model.
 2. **Trial a post-restart watch window as a zero-ML rule.** Here: after any break, run with extra attention for 105 minutes (the train-week 90th percentile of follow-on spacing). The fixed window itself was not scored on test weeks. The closest scored rule, the Hawkes hazard alarm, caught 18 of 19 test follow-on breaks at about 1.6 false alarms per shift, while staying on for 30% of operating time. Measure what the extra attention costs before rolling it out.
-3. **Screen detectors on first-in-episode breaks only, with an episode-aware null.** Break-level screening produced a survivor that is one bad evening; the clustered calibration shows the break-level test can produce 7 false survivors in a run.
-4. **Bring the top episode-level candidates (here `x51` level, `x26`/`x16`/`x13` deviation) to the process engineer** to name the signals and confirm on the floor, then trial one with a stated false-alarm budget and a measured *e*.
+3. **Put the learned model on the breaks history cannot foresee.** Boost a sensor model from the break hazard (section 12) and judge it on first-in-episode breaks at a matched alarm-on budget. Here it warned 15 of 53 first breaks at 10% alarm-on time against 1 of 53 for the hazard.
+4. **Screen detectors on first-in-episode breaks only, with an episode-aware null.** Break-level screening produced a survivor that is one bad evening; the clustered calibration shows the break-level test can produce 7 false survivors in a run.
+5. **Bring the top episode-level candidates (here `x51` level, `x26`/`x16`/`x13` deviation) to the process engineer** to name the signals and confirm on the floor, then trial one with a stated false-alarm budget and a measured *e*.
+
+## 12. Hazard + sensors: where the learned model earns its place
+
+Sections 4 and 10 left two loose ends: the sensor model never beat the 3-parameter hazard overall, and the alarm comparison was at a matched false-alarm *count* that left the hazard alarm on for 29.5% of the time and the GBM for 2.6%. This section fixes both. Code: `pipeline/hybrid.py`, `pipeline/hybrid_run.py`; tests: `tests/test_hybrid.py`.
+
+**Hybrid model.** The hazard knows only break history. The learned part starts from it and adds sensor corrections:
+
+    logit P(break in (t, t+h] | history, sensors) = logit p_Hawkes(t) + f(x_t)
+
+where `p_Hawkes(t) = 1 − exp(−[μh + (α/β) E(t)(1 − e^(−βh))])` (section 9) and `f` is a LightGBM ensemble trained with the hazard log-odds as `init_score`, so every tree fits the *residual* of the hazard. With no trees `f = 0` and the hybrid equals the hazard (unit test). `x_t` is the same 531 past-only sensor features plus grade as section 4. Hyperparameters were fixed before any result and not tuned: 200 trees, learning rate 0.03, 7 leaves, min 60 rows per leaf, 30% of features per tree, L2 = 5, no class weighting (so the offset stays a probability).
+
+Compared on identical folds:
+
+| Score | What it uses |
+|---|---|
+| Hawkes hazard | 3 parameters, break history only |
+| Sensor GBM | same LightGBM settings, sensors only, no history |
+| **Hybrid GBM** | LightGBM boosted from the Hawkes log-odds |
+| Hybrid logistic | L2 logistic (C = 0.01) on sensors + Hawkes log-odds |
+
+**Validation design (no leakage).** 5 contiguous blocks of about 5.6 days; each inner boundary is moved to the nearest row at least 120 minutes from every break so no episode is split (here the equal-size boundaries already satisfied this). Forward chaining: blocks 2 to 5 are each scored by models trained only on earlier blocks, with the last *h* rows before the test block purged so no training label can see a test break. The Hawkes parameters are refitted on each training prefix (branching 0.38 to 0.61 across folds). Scores at test time use only break times up to *t*, which a live system would know. Scored: 14,028 eligible rows, **89 breaks: 53 first-in-episode, 36 follow-on**, 58.5 operating shifts.
+
+**Matched alarm budgets.** Each score gets the same alarm-on time: in each test block the alarm is on for exactly the top *b* share of eligible rows by score (label-free; ties broken by row order). A break is warned if the alarm is on between 20 and 10 minutes before it.
+
+**Uncertainty.** PR-AUC differences: paired bootstrap over ~1-day blocks of test rows (720 rows), 2,000 resamples. Recall differences: paired bootstrap over episodes (all breaks of an episode resampled together), 2,000 resamples.
+
+### Results, 20-minute horizon
+
+PR-AUC (prevalence: all 0.056, first-break subset 0.039, follow-on subset 0.019, quiet-regime rows 0.046):
+
+| Score | All breaks | First-in-episode | Follow-on | Quiet regime (≥ 2 h since last break) |
+|---|---|---|---|---|
+| Hawkes hazard | 0.102 | 0.031 | **0.148** | 0.044 |
+| Sensor GBM | 0.096 | **0.061** | 0.044 | **0.076** |
+| **Hybrid GBM** | **0.121** | 0.050 | 0.126 | 0.073 |
+| Hybrid logistic | 0.049 | 0.033 | 0.017 | 0.039 |
+
+| Paired difference (95% CI, day-block bootstrap) | All | First-in-episode | Follow-on |
+|---|---|---|---|
+| Hybrid − Hawkes | **+0.019 (+0.002 to +0.043)** | **+0.020 (+0.012 to +0.034)** | −0.022 (−0.054 to +0.024) |
+| Sensor GBM − Hawkes | −0.006 (−0.050 to +0.050) | **+0.031 (+0.016 to +0.063)** | −0.104 (−0.164 to +0.002) |
+| Hybrid − sensor GBM | +0.025 (−0.017 to +0.061) | −0.011 (−0.035 to +0.001) | **+0.082 (+0.003 to +0.135)** |
+
+Breaks warned ≥ 10 min ahead at matched alarm-on time:
+
+| Alarm on | Score | First-in-episode (of 53) | Follow-on (of 36) | All (of 89) | False alarms / shift |
+|---|---|---|---|---|---|
+| 5% | Hawkes | 0 | 13 | 15% | 0.4 |
+| 5% | Sensor GBM | 9 | 11 | 22% | 2.9 |
+| 5% | **Hybrid GBM** | **7** | **14** | **24%** | 2.9 |
+| 10% | Hawkes | 1 | 20 | 24% | 0.6 |
+| 10% | Sensor GBM | 16 | 19 | 39% | 4.9 |
+| 10% | **Hybrid GBM** | **15** | **21** | **40%** | 5.0 |
+| 20% | Hawkes | 6 | 25 | 35% | 0.9 |
+| 20% | Sensor GBM | 24 | 25 | 55% | 8.2 |
+| 20% | Hybrid GBM | 20 | 24 | 49% | 8.4 |
+
+| Hybrid − Hawkes recall (episode bootstrap, 95% CI) | First-in-episode | Follow-on | All |
+|---|---|---|---|
+| 5% alarm-on | **+13 pts (+6 to +23)** | +3 pts (−17 to +24) | +9 pts (0 to +20) |
+| 10% alarm-on | **+26 pts (+15 to +40)** | +3 pts (−18 to +29) | **+17 pts (+5 to +31)** |
+| 20% alarm-on | **+26 pts (+13 to +40)** | −3 pts (−23 to +17) | **+15 pts (+4 to +27)** |
+
+**Reading.**
+1. **Sensors add measurable lift on first breaks, which history cannot foresee.** On first-in-episode breaks the hazard is below prevalence (0.031 vs 0.039) by construction; both learned sensor models beat it with CIs that exclude zero, and at 10% alarm-on time the hybrid warns 15 of 53 first breaks against 1 of 53. The 19-episode lead from section 4 holds on 53.
+2. **For follow-on breaks the hazard suffices.** The hybrid ties it (difference CI spans zero), and the sensor-only GBM is far worse there (0.044 vs 0.148). Sensors add nothing measurable once the line is in an episode.
+3. **The hybrid is the one score that does both jobs.** It is the only score that beats the hazard on all breaks (+0.019, CI +0.002 to +0.043) and the only one above both baselines overall, because it keeps the hazard's follow-on skill (+0.082 over sensor-only on follow-ons) while adding most of the sensor lift on first breaks (it gives back 0.011 to the sensor-only GBM there, CI −0.035 to +0.001).
+4. **Seed check:** hybrid PR-AUC on all breaks 0.121 / 0.119 / 0.127 and on first breaks 0.050 / 0.051 / 0.050 over seeds 11, 12, 13.
+
+**What does not win (reported, not hidden).**
+- **Absolute first-break skill is low:** PR-AUC 0.050 against a 0.039 prevalence (1.3×). At 10% alarm-on time the hybrid catches 28% of first breaks but raises about 5 rising-edge false alarms per shift. That is a screening signal for a process engineer, not an operator alarm.
+- **False-alarm counts favour the hazard** at every budget (0.4 to 0.9 per shift against 2.9 to 8.4): its alarm is one long block after each break, the sensor alarms flicker. Matched on-time and matched alarm count give opposite pictures; section 10 showed the other one.
+- **At 60 minutes the hazard wins overall** (PR-AUC 0.276 vs hybrid 0.219 vs sensor GBM 0.168) and the first-break lift is no longer significant (hybrid − Hawkes +0.011, CI −0.007 to +0.037). The hybrid's follow-on PR-AUC falls well below the hazard's (0.220 vs 0.476): at the longer horizon the learned corrections overfit and damage the hazard. The sensor signal is short-range.
+- **The hybrid logistic model fails** (all-break PR-AUC 0.049, below prevalence): a linear model on 531 correlated features cannot use the sensors and drowns the hazard term.
+- On first breaks the sensor-only GBM is slightly ahead of the hybrid at every budget (not significant at 5% or 10%; at 20% alarm-on the gap is 4 first breaks). If a plant wants a first-break screen only, the sensor-only model is enough; the hybrid is the better single score.
+- The forward-chaining test period differs from section 4's single 25% split, so absolute PR-AUCs differ (Hawkes 0.102 here vs 0.166 there); comparisons are only made within a table.
 
 ## Reproduce
 
@@ -216,5 +293,6 @@ What these numbers say a forward-deployed data scientist should do first:
 uv venv .venv && uv pip install -r requirements.txt --python .venv/bin/python
 export OMP_NUM_THREADS=2
 .venv/bin/python -I pipeline/run.py data/raw/processminer.csv src/data/results.json   # ~55 s
+.venv/bin/python -I pipeline/hybrid_run.py data/raw/processminer.csv src/data/results.json   # ~6 min, adds the `hybrid` section
 .venv/bin/python -I -m pytest -q tests
 ```
