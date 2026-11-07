@@ -31,11 +31,13 @@ EPISODE_GAP_MIN = 120
 BUDGETS = [0.02, 0.05, 0.10, 0.20]   # share of operating time the alarm is on
 LEAD_MIN_ROWS = 5            # >= 10 min of warning
 B_BOOT = 2000
+R_NULL = 500                 # draws for the alarm-budget chance null
+R_NULL_AP = 1000             # draws for the first-break PR-AUC chance null
 DAY_ROWS = 720               # ~24 h at 2-minute sampling
 SEEDS_ROBUST = [11, 12, 13]
 CACHE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "cache")
 
-MODELS = ["hawkes", "sensor_gbm", "hybrid_gbm", "hybrid_logistic"]
+MODELS = ["hawkes", "sensor_gbm", "hybrid_gbm", "hybrid_superpose", "hybrid_logistic"]
 
 
 def features(df, sig, src):
@@ -53,7 +55,7 @@ def features(df, sig, src):
     return F
 
 
-def run_horizon(hm, X, Xf, label, elig, tmin, onsets, t_on, bounds, seed):
+def run_horizon(hm, X, Xf, label, elig, tmin, onsets, t_on, bounds, seed, since_min):
     n = len(label)
     h = hm // 2
     rows = np.arange(n)
@@ -75,6 +77,14 @@ def run_horizon(hm, X, Xf, label, elig, tmin, onsets, t_on, bounds, seed):
         sc["sensor_gbm"][mte] = g.predict_proba(X[mte])[:, 1]
         hg = hy.fit_offset_gbm(X[mtr], label[mtr], off[mtr], seed)
         sc["hybrid_gbm"][mte] = hy.predict_offset_gbm(hg, X[mte], off[mte])
+        # superposed hybrid: Hawkes excitation (mu = 0) + a sensor-learned
+        # background intensity. The background GBM is trained only on quiet rows
+        # (>= EPISODE_GAP_MIN since the last break), whose next break is by
+        # definition first-in-episode, so it is a first-break model.
+        exc = rl.hawkes_p_next(tmin, t_on, hm, 0.0, hk["a"], hk["b"])
+        qtr = mtr & (since_min >= EPISODE_GAP_MIN)
+        gb = hy.fit_plain_gbm(X[qtr], label[qtr], seed)
+        sc["hybrid_superpose"][mte] = hy.superpose(exc[mte], gb.predict_proba(X[mte])[:, 1])
         Xl = np.column_stack([Xf[mtr], off[mtr]])
         lr = make_pipeline(StandardScaler(), LogisticRegression(C=0.01, max_iter=4000))
         lr.fit(Xl, label[mtr])
@@ -133,13 +143,57 @@ def evaluate(hm, sc, fold_of, label, elig, since_min, onsets, ep_id, ep_first, t
     if not boot:
         return out
 
+    # chance level for "breaks warned at matched on-time": rotate each score
+    # inside its block (keeps its flicker, breaks alignment with breaks), and a
+    # row-iid random score. Separate RNG so the bootstrap CIs below are unchanged.
+    nrng = np.random.default_rng(SEED + 1000)
+    blk_idx = [np.where((fold_of == f) & elig)[0] for f in np.unique(fold_of[fold_of > 0])]
+    chance = {}
+    for bgt in BUDGETS:
+        row = {}
+        for m in ("hawkes", "sensor_gbm", "hybrid_gbm", "hybrid_superpose"):
+            nl = hy.shift_null_warned(sc[m], blk_idx, bgt, on_te, first_te, h, LEAD_MIN_ROWS, R_NULL, nrng)
+            obs = budgets[str(bgt)][m]
+            row[m] = {"first_obs": obs["warned_first"], "first_null_mean": float(nl[True].mean()),
+                      "first_null_p95": float(np.quantile(nl[True], 0.95)),
+                      "first_p": float((nl[True] >= obs["warned_first"]).mean()),
+                      "follow_obs": obs["warned_follow"], "follow_null_mean": float(nl[False].mean()),
+                      "follow_p": float((nl[False] >= obs["warned_follow"]).mean())}
+        rnd = hy.shift_null_warned(nrng.random(n), blk_idx, bgt, on_te, first_te, h, LEAD_MIN_ROWS, R_NULL // 5, nrng)
+        row["random_iid"] = {"first_mean": float(rnd[True].mean()), "follow_mean": float(rnd[False].mean())}
+        chance[str(bgt)] = row
+    out["chance"] = {"R": R_NULL, "method": "per-block circular shift of each score; random_iid = uniform row scores",
+                     "budgets": chance}
+
+    # chance level for PR-AUC on first-in-episode breaks (the task the hazard
+    # cannot do): same per-block rotation, AP recomputed on first-break rows.
+    pos_t = np.where(test)[0]
+    yfull = np.zeros(n, int)
+    yfull[pos_t] = y
+    mfirst = np.zeros(n, bool)
+    mfirst[pos_t] = (y == 0) | nf
+    mquiet = np.zeros(n, bool)
+    mquiet[pos_t] = quiet
+    apn = {}
+    for m in ("hawkes", "sensor_gbm", "hybrid_gbm", "hybrid_superpose"):
+        s_full = np.where(test, sc[m], 0.0)
+        row = {}
+        for nm, msk, obs in (("first", mfirst, out["ap"][m]["first"]), ("quiet", mquiet, out["ap_quiet"][m])):
+            nl = hy.shift_null_ap(yfull, s_full, blk_idx, msk, R_NULL_AP, nrng)
+            row[nm] = {"obs": obs, "null_mean": float(nl.mean()), "null_p95": float(np.quantile(nl, 0.95)),
+                       "p": float((1 + (nl >= obs).sum()) / (1 + len(nl)))}
+        apn[m] = row
+    out["ap_chance"] = {"R": R_NULL_AP, "method": "per-block circular shift of each score; AP on first-break rows / quiet rows",
+                        "models": apn}
+
     # bootstrap: AP differences by ~1-day blocks; recall differences by episode
     blocks = (np.where(test)[0] // DAY_ROWS)
     a_f = (y == 0) | nf
     a_o = (y == 0) | ~nf
     ci = {}
     for a, b in (("hybrid_gbm", "hawkes"), ("hybrid_gbm", "sensor_gbm"), ("sensor_gbm", "hawkes"),
-                 ("hybrid_logistic", "hawkes")):
+                 ("hybrid_logistic", "hawkes"), ("hybrid_superpose", "hawkes"),
+                 ("hybrid_superpose", "sensor_gbm"), ("hybrid_superpose", "hybrid_gbm")):
         s1, s2 = sc[a][test], sc[b][test]
         ci[f"{a}_minus_{b}"] = {
             "ap_all": hy.day_block_ap_diff(y, s1, s2, blocks, B_BOOT, rng),
@@ -149,7 +203,8 @@ def evaluate(hm, sc, fold_of, label, elig, since_min, onsets, ep_id, ep_first, t
     out["ap_ci"] = ci
     rci = {}
     for bgt in BUDGETS:
-        for a, b in (("hybrid_gbm", "hawkes"), ("hybrid_gbm", "sensor_gbm")):
+        for a, b in (("hybrid_gbm", "hawkes"), ("hybrid_gbm", "sensor_gbm"),
+                     ("hybrid_superpose", "hawkes"), ("hybrid_superpose", "sensor_gbm")):
             w1, w2 = warned_all[(bgt, a)], warned_all[(bgt, b)]
             rci[f"{bgt}:{a}_minus_{b}"] = {
                 "first": hy.cluster_boot_diff(w1[first_te], w2[first_te], eps_te[first_te], B_BOOT, rng),
@@ -190,19 +245,22 @@ def main(src, out_json):
            "models": {"hawkes": "self-exciting hazard, 3 parameters, break history only",
                       "sensor_gbm": "LightGBM on 531 sensor features + grade, no history",
                       "hybrid_gbm": "LightGBM boosted from the Hawkes log-odds (init_score): learns sensor corrections to the hazard",
+                      "hybrid_superpose": "Hawkes excitation (mu = 0) superposed with a sensor-learned background intensity: LightGBM trained on quiet rows (>= 2 h since the last break); P = 1 - (1 - P_exc)(1 - P_bg)",
                       "hybrid_logistic": "L2 logistic regression on sensor features + Hawkes log-odds"},
            "horizons": {}}
     for hm in HORIZONS_MIN:
         label, elig = lb.make_labels(n, onsets, hm // 2, mask_k)
-        sc, fold_of, fits = run_horizon(hm, X, Xf, label, elig, tmin, onsets, t_on, bounds, SEED)
+        sc, fold_of, fits = run_horizon(hm, X, Xf, label, elig, tmin, onsets, t_on, bounds, SEED, since_min)
         ev = evaluate(hm, sc, fold_of, label, elig, since_min, onsets, ep_id, ep_first, tmin, rng)
         ev["fits"] = fits
         # seed robustness for the learned models (headline numbers only)
         rob = []
         for s in SEEDS_ROBUST[1:]:
-            sc2, _, _ = run_horizon(hm, X, Xf, label, elig, tmin, onsets, t_on, bounds, s)
+            sc2, _, _ = run_horizon(hm, X, Xf, label, elig, tmin, onsets, t_on, bounds, s, since_min)
             e2 = evaluate(hm, sc2, fold_of, label, elig, since_min, onsets, ep_id, ep_first, tmin, rng, boot=False)
             rob.append({"seed": s, "ap_first_hybrid": e2["ap"]["hybrid_gbm"]["first"],
+                        "ap_first_superpose": e2["ap"]["hybrid_superpose"]["first"],
+                        "ap_all_superpose": e2["ap"]["hybrid_superpose"]["all"],
                         "ap_all_hybrid": e2["ap"]["hybrid_gbm"]["all"],
                         "recall_first_5pct_hybrid": e2["budgets"]["0.05"]["hybrid_gbm"]["recall_first"]})
         ev["seed_robustness"] = rob
@@ -216,6 +274,8 @@ def main(src, out_json):
         print("AP CI", json.dumps({k: {kk: (round(vv["point"], 4), round(vv["lo"], 4), round(vv["hi"], 4)) for kk, vv in v.items()} for k, v in ev["ap_ci"].items()}))
         print("recall CI", json.dumps({k: {kk: (round(vv["point"], 3), round(vv["lo"], 3), round(vv["hi"], 3)) for kk, vv in v.items()} for k, v in ev["recall_ci"].items()}))
         print("robust", rob)
+        print("chance", json.dumps(ev["chance"]["budgets"]))
+        print("AP chance", json.dumps(ev["ap_chance"]["models"]))
     res["hybrid"] = hyb
     with open(out_json, "w") as f:
         json.dump(res, f, separators=(",", ":"))

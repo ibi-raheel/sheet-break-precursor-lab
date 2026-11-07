@@ -67,6 +67,13 @@ def fit_plain_gbm(X, y, seed, n_jobs=3, **over):
     return m
 
 
+def superpose(p_a, p_b):
+    """Probability of at least one event in the horizon when two independent
+    Poisson sources act together: Lambda = Lambda_a + Lambda_b, so
+    P = 1 - exp(-(Lambda_a + Lambda_b)) = 1 - (1 - p_a)(1 - p_b)."""
+    return 1.0 - (1.0 - np.asarray(p_a, float)) * (1.0 - np.asarray(p_b, float))
+
+
 # ---------------------------------------------------------------- evaluation
 def subset_ap(y, score, next_is_first):
     """PR-AUC on all rows, and with positives restricted to rows whose next
@@ -112,6 +119,55 @@ def false_alarms(alarm, onsets, W):
     pos = np.searchsorted(on, starts, side="right")
     nxt = np.where(pos < len(on), on[np.minimum(pos, len(on) - 1)], 10 ** 12)
     return int(((nxt - starts) > W).sum()), int(len(starts))
+
+
+# ---------------------------------------------------------------- chance baselines
+def shift_null_warned(score, blocks, budget, onsets, groups, W, min_lead, R, rng):
+    """Chance level for event recall at a matched alarm budget.
+
+    A flickering alarm hits a short warning window by luck far more often than
+    one long block does, so "breaks warned at matched on-time" needs a null.
+    Each draw rotates the score by a random offset inside every block (only
+    over that block's eligible rows), which keeps the alarm's own on/off run
+    structure and on-time but breaks its alignment with the breaks.
+
+    blocks: list of index arrays (eligible rows of each scored block).
+    groups: per-onset label (e.g. True = first-in-episode) to count separately.
+    Returns {group: array of warned counts, length R}.
+    """
+    score = np.asarray(score, float)
+    n = len(score)
+    groups = np.asarray(groups)
+    out = {g: np.empty(R, int) for g in np.unique(groups).tolist()}
+    for r in range(R):
+        alarm = np.zeros(n, bool)
+        for idx in blocks:
+            s = np.full(n, -np.inf)
+            s[idx] = np.roll(score[idx], int(rng.integers(1, len(idx))))
+            el = np.zeros(n, bool)
+            el[idx] = True
+            alarm |= budget_alarm(s, el, budget)
+        w = warned_by(alarm, onsets, W, min_lead)
+        for g in out:
+            out[g][r] = int(w[groups == g].sum())
+    return out
+
+
+def shift_null_ap(y, score, blocks, mask, R, rng):
+    """Chance level for PR-AUC on a row subset: rotate the score by a random
+    offset inside every block (keeps its autocorrelation, breaks its alignment
+    with the labels) and recompute AP on `mask`. y, score, mask are full-length;
+    blocks are index arrays into them. Returns an array of R AP values."""
+    y = np.asarray(y)
+    score = np.asarray(score, float)
+    m = np.asarray(mask, bool)
+    out = np.empty(R)
+    for r in range(R):
+        s = score.copy()
+        for idx in blocks:
+            s[idx] = np.roll(score[idx], int(rng.integers(1, len(idx))))
+        out[r] = average_precision_score(y[m], s[m])
+    return out
 
 
 # ---------------------------------------------------------------- bootstrap

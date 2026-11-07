@@ -104,3 +104,59 @@ def test_exported_hybrid_results_are_consistent():
         for v in ev["ap_ci"].values():
             for c in v.values():
                 assert c["lo"] <= c["hi"] and c["B"] >= 1000
+
+
+def test_shift_null_shows_flicker_hits_windows_by_chance():
+    # 200 rows, one block, alarm budget 10% (20 rows); breaks at rows 50 and 150,
+    # warning window 4 rows with lead >= 1 (rows o-4..o-1).
+    # A comb alarm (every 10th row) hits any 4-row window with probability 4/10;
+    # one 20-row block hits it with probability (20 + 4 - 1) / 200 = 0.115.
+    n = 200
+    idx = [np.arange(n)]
+    onsets = np.array([50, 150])
+    groups = np.array([True, True])
+    comb = (np.arange(n) % 10 == 0).astype(float)
+    block = (np.arange(n) < 20).astype(float)
+    rng = np.random.default_rng(0)
+    nc = hy.shift_null_warned(comb, idx, 0.10, onsets, groups, 4, 1, 400, rng)[True]
+    nb = hy.shift_null_warned(block, idx, 0.10, onsets, groups, 4, 1, 400, rng)[True]
+    assert nc.mean() == pytest.approx(2 * 0.4, abs=0.1)
+    assert nb.mean() == pytest.approx(2 * 0.115, abs=0.07)
+
+
+def test_superpose_is_sum_of_poisson_intensities_by_hand():
+    # Excitation gives P = 0.2, sensor background gives P = 0.5 over the horizon.
+    # Superposed: 1 - 0.8 * 0.5 = 0.6.
+    assert hy.superpose(0.2, 0.5) == pytest.approx(0.6)
+    # Same thing via intensities: Lambda_a = -ln 0.8, Lambda_b = -ln 0.5,
+    # P = 1 - exp(-(Lambda_a + Lambda_b)) = 1 - 0.8 * 0.5.
+    la, lb_ = -np.log(0.8), -np.log(0.5)
+    assert hy.superpose(0.2, 0.5) == pytest.approx(1 - np.exp(-(la + lb_)))
+    # A zero background returns the excitation term unchanged, and vice versa.
+    p = np.array([0.0, 0.1, 0.7])
+    assert np.allclose(hy.superpose(p, 0.0), p)
+    assert np.allclose(hy.superpose(0.0, p), p)
+
+
+def test_superposed_hazard_with_zero_background_is_excitation_only_hawkes():
+    # Hawkes with mu = 0 plus a background of P_bg = 1 - exp(-mu h) is the full Hawkes.
+    from pipeline import reliability as rl
+    rt = np.linspace(0, 600, 301)
+    ev = np.array([50.0, 60.0, 300.0])
+    mu, a, b, h = 0.003, 0.004, 0.02, 20
+    full = rl.hawkes_p_next(rt, ev, h, mu, a, b)
+    exc = rl.hawkes_p_next(rt, ev, h, 0.0, a, b)
+    assert np.allclose(hy.superpose(exc, 1 - np.exp(-mu * h)), full)
+
+
+def test_shift_null_ap_separates_aligned_from_rotated_scores():
+    # Labels: 1 on rows 45..49 and 145..149 of 200. A score equal to the label has AP 1;
+    # rotating it inside the block misaligns it, so the null mean is far below 1.
+    n = 200
+    y = np.zeros(n, int)
+    y[45:50] = 1
+    y[145:150] = 1
+    rng = np.random.default_rng(0)
+    nl = hy.shift_null_ap(y, y.astype(float) + 1e-3 * rng.random(n), [np.arange(n)], np.ones(n, bool), 300, rng)
+    assert nl.mean() < 0.3
+    assert (nl >= 0.999).mean() < 0.05
