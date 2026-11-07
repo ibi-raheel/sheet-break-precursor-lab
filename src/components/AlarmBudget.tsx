@@ -66,7 +66,7 @@ export default function AlarmBudget() {
         })}
       </div>
       <p className="panel-note mono">
-        <i className="lg lg-nullmark" />chance = the score's own trace rotated in time (500 draws), same on-time and flicker.
+        <b><i className="lg lg-nullmark" />tick = chance:</b> the score's own trace rotated in time (500 draws), same on-time and flicker.
         A random score at this budget would warn about {Math.round(ch.random_iid.first_mean)} first breaks because it flickers. Filled squares are counts, not specific breaks.
       </p>
     </div>

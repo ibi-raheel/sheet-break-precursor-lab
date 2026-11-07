@@ -100,7 +100,7 @@ export default function App() {
           </header>
 
           <Step n={1} id="machine" title={`One machine, 28 days, ${m.breaks} breaks`}
-            lede={<>This is the chart recorder for one of the {m.signals} sensors. Each red mark is a sheet break; after {r.downtime.breaks_with_gap} of them the record goes silent for about {Math.round(r.downtime.mean_min_per_break)} minutes while the line is down.</>}
+            lede={<>The chart recorder for one of the {m.signals} sensors. Each red mark is a sheet break, and the line is down about {Math.round(r.downtime.mean_min_per_break)} minutes after it. The purple pen is the chance of a break in the next 20 minutes, from break history alone.</>}
             details={<>
               <ul>
                 <li>Downtime is inferred from timestamp gaps right after a break ({r.downtime.gaps_within_2_rows_after_break} of {r.downtime.gaps_total} gaps): {f1(r.downtime.total_hours)} line-hours over 28 days, {f1(r.downtime.hours_per_day)} h a day. The dataset does not label it.</li>
@@ -130,7 +130,7 @@ export default function App() {
           </Step>
 
           <Step n={3} id="ai" title="Can the sensors see a first break coming?"
-            lede={<>Break history cannot: on first breaks the hazard scores {f3(AP.hawkes.first)}, under the {f3(AP.hawkes.prev_first)} base rate. The AI sensor model scores {f3(AP.sensor_gbm.first)}, {firstRatio.toFixed(1)}× the base rate and above chance (p = {pv(APC.sensor_gbm.first.p)}); the hybrid is borderline, and the signal is gone at 60 minutes.</>}
+            lede={<>Break history cannot: on first breaks it scores below the base rate. The AI sensor model scores {firstRatio.toFixed(1)}× the base rate, above chance (p = {pv(APC.sensor_gbm.first.p)}). The hybrid is borderline, and by 60 minutes ahead the signal is gone.</>}
             details={<>
               <p>PR-AUC on {H20.test_breaks} out-of-sample breaks ({H20.test_first_breaks} first, {H20.test_follow_breaks} follow-on), forward-chaining folds that never split an episode, {H20.h_min}-minute look-ahead. Prevalence: all {f3(AP.hawkes.prev_all)}, first {f3(AP.hawkes.prev_first)}, follow-on {f3(AP.hawkes.prev_follow)}.</p>
               <div className="tbl"><table>

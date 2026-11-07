@@ -66,7 +66,7 @@ export default function DaySheets() {
           <g key={d}>
             <line x1={left} x2={left + plotW} y1={top + (d + 1) * rowH - 0.5} y2={top + (d + 1) * rowH - 0.5} stroke={C.gridMinor} />
             {(!narrow || d % 2 === 0) && <text x={left - 8} y={top + d * rowH + rowH - 4} textAnchor="end" className="ax">{narrow ? d + 1 : `${d + 1} May`}</text>}
-            <path d={hazPaths[d]} fill={C.hazardFill} stroke="none" />
+            <path d={hazPaths[d]} fill={C.hazard} fillOpacity={0.3} stroke="none" />
           </g>
         ))}
         {bands.map((b, i) => <rect key={i} x={b.x} y={b.y} width={b.w} height={2} fill={C.ink} opacity={0.75} />)}

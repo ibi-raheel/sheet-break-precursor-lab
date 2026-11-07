@@ -37,9 +37,9 @@ export default function TrendStrip() {
   const [inRef, seen] = useInView<HTMLDivElement>('-10% 0px')
   const win = w < 640 ? 360 : 720
   const [center, setCenter] = useState(onsetMin[firstCluster] + 160)
-  const [showPen, setShowPen] = useState(false)
-  const [showAlarm, setShowAlarm] = useState(false)
-  const [showRule, setShowRule] = useState(false)
+  const [showPen, setShowPen] = useState(true)
+  const [showAlarm, setShowAlarm] = useState(true)
+  const [showRule, setShowRule] = useState(true)
   const [hover, setHover] = useState<number | null>(null)
   const det = useRef<HTMLCanvasElement>(null)
   const ov = useRef<HTMLCanvasElement>(null)
@@ -270,6 +270,8 @@ export default function TrendStrip() {
         />
         <div className="lane-tag mono" style={{ top: L.top + 2 }}>CH1 {r.timeline.signal}</div>
         <div className={`lane-tag mono ${showPen ? '' : 'off'}`} style={{ top: L.hazTop + 2, color: showPen ? C.hazard : undefined }}>CH2 hazard, next 20 min{showPen ? '' : ': off'}</div>
+        <div className={`lane-tag lane-sm mono ${showAlarm ? '' : 'off'}`} style={{ top: L.alarmY - 3, color: showAlarm ? C.hazard : undefined }}>ALM hazard</div>
+        <div className={`lane-tag lane-sm mono ${showRule ? '' : 'off'}`} style={{ top: L.ruleY - 2, color: showRule ? C.rule : undefined }}>ALM {r.timeline.signal}</div>
         {hv !== null && (
           <div className="tip mono" style={{ left: Math.min(Math.max(hvX + 12, 0), w - 190), top: 18 }}>
             <div>{clock(minutes[hv])}</div>
@@ -320,9 +322,9 @@ function AlarmLog({ t0, t1, haz, rule }: { t0: number; t1: number; haz: boolean;
   const lines: Line[] = []
   onsets.forEach((row, k) => {
     const m = minutes[row]; if (m < t0 || m > t1) return
-    lines.push({ m, tag: 'BRK', txt: isFirst[k] ? 'sheet break, first of episode' : `sheet break, follow-on (+${m - onsetMin[k - 1]} min)`, cls: 'l-brk' })
+    lines.push({ m, tag: 'BRK', txt: isFirst[k] ? 'sheet break, first of episode' : `follow-on, +${m - onsetMin[k - 1]} min`, cls: 'l-brk' })
   })
-  if (haz) edges(hazardAlarm, i0, i1).forEach((i) => lines.push({ m: minutes[i], tag: 'HAZ', txt: `hazard alarm on, p(break in 20 min) ${f3(hazard[i])}`, cls: 'l-haz' }))
+  if (haz) edges(hazardAlarm, i0, i1).forEach((i) => lines.push({ m: minutes[i], tag: 'HAZ', txt: `hazard high, p ${f3(hazard[i])}`, cls: 'l-haz' }))
   if (rule) edges(ruleAlarm, i0, i1).forEach((i) => lines.push({ m: minutes[i], tag: 'RUL', txt: `${RULE.signal} below ${RULE.threshold.toFixed(1)} (${values[i].toFixed(1)})`, cls: 'l-rul' }))
   lines.sort((a, b) => a.m - b.m)
   return (
