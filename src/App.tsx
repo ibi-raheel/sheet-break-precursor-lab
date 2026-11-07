@@ -97,12 +97,12 @@ export default function App() {
             <p className="mast-q">With a few weeks of data and a few dozen breaks, which alarm rules can you trust?</p>
             <ul className="mast-a">
               <li>Breaks come in episodes: count each one once and {r.episode_level.survivors} of {r.detectors.length} sensor rules hold.</li>
-              <li>Break timing alone predicts the follow-on breaks.</li>
+              <li>Break timing alone ranks the follow-on breaks as well as any sensor model.</li>
               <li>Sensors help only on the first break of an episode, as a screening signal ({firstRatio.toFixed(1)}× the base rate).</li>
             </ul>
-            <a className="mast-cta" href="#solution">Here's the playbook<span aria-hidden="true"> →</span></a>
+            <a className="mast-cta" href="#solution">The solution: a first-week playbook<span aria-hidden="true"> →</span></a>
             <p className="mast-meta mono">
-              <span>RECORD 1 to 29 May</span><span>{m.signals} sensors</span><span>{m.sampling_min}-min sampling</span><span>{m.rows.toLocaleString()} rows</span>
+              <span>RECORD 1 to 29 May</span><span>{m.signals} sensors</span><span>{m.sampling_min}-min sampling</span><span>{m.rows.toLocaleString()} rows</span><span>public dataset</span>
             </p>
             <Schematic />
           </header>
@@ -226,7 +226,7 @@ export default function App() {
           </Step>
 
           <Step n={7} id="solution" title="The solution: a first-week playbook"
-            lede="Five steps for any line with rare, clustered failures, and a tool that runs them on one CSV."
+            lede="Five steps drawn from what this data showed, for a line with rare, clustered failures, and a tool that runs them on one CSV."
             details={<>
               <ol className="pb-list">
                 <li><b>Size the prize before any model.</b> Measure downtime per event from the historian (here {Math.round(r.downtime.mean_min_per_break)} min per break, {f1(r.downtime.hours_per_day)} line-hours a day) and fit the break hazard (here branching {f2(rel.hawkes.branching)}).</li>
@@ -239,9 +239,9 @@ export default function App() {
             </>}>
             <ol className="pb">
               {[
-                { t: 'Size the prize', v: f1(r.downtime.hours_per_day), u: 'line-hours a day lost to breaks', c: 'var(--ink)' },
+                { t: 'Size the prize', v: f1(r.downtime.hours_per_day), u: 'line-hours a day lost to breaks (inferred from gaps)', c: 'var(--ink)' },
                 { t: 'Split the breaks', v: `${r.episodes.first_in_episode} / ${r.episodes.follow_on}`, u: 'first-in-episode / follow-on', c: 'var(--brk)' },
-                { t: 'Follow-ons need no ML', v: `${rel.followon_since_prev_min.q90} min`, u: 'watch window after a restart', c: 'var(--hazard)' },
+                { t: 'Follow-ons: no ML first', v: `${rel.followon_since_prev_min.q90} min`, u: 'watch window after a restart', c: 'var(--hazard)' },
                 { t: 'First breaks: sensor screen', v: `${firstRatio.toFixed(1)}×`, u: 'the base rate, judged against chance', c: 'var(--sensor)' },
                 { t: 'Count each episode once', v: `${r.episode_level.survivors} of ${r.detectors.length}`, u: 'rules hold; the shortlist goes to the process engineer', c: 'var(--ink)' },
               ].map((p, i) => (
@@ -261,7 +261,7 @@ export default function App() {
 <span className="t-k">{r.episode_level.top_break_level.id.padEnd(9)}</span> <span className="t-warn">ONE-EPISODE ARTEFACT</span>: drop{'\n'}
 <span className="t-k">VERDICT  </span> clustered: split first vs follow-on</pre>
             </div>
-            <p className="pb-close">Built on public paper-machine data. On a real line, week one ends with this page filled in with that line's numbers.</p>
+            <p className="pb-close">Measured on public paper-machine data, not yet on a production line. Validating it on a real line is week one: run the tool on that line's historian and fill this page in with its numbers.</p>
           </Step>
 
           <footer className="foot">

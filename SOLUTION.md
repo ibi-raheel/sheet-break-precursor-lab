@@ -10,7 +10,7 @@
 - On the first break of an episode, where history has no skill, the sensor model ranked the 20-minute windows at 1.6× the base rate (p = 0.001). That makes it a screening signal, not yet an alarm.
 - None of the 10 signals the model leaned on most (SHAP) survived, and SHAP rank vs lift correlated at 0.08.
 
-The rest of this page turns that into steps anyone can run on a new line in its first week.
+The rest of this page turns that into steps to test on a new line in its first week. They come from one public dataset and have not yet been validated on a production line.
 
 ## The playbook
 
@@ -28,7 +28,7 @@ The rest of this page turns that into steps anyone can run on a new line in its 
 | Episode gap | Events < 2 h apart are one episode (agree with operators) | 124 breaks → 69 episodes |
 | Watch window after a restart | 90th percentile of follow-on spacing on training weeks | 103 min (median 65) |
 | Follow-on alarm | Use the hazard / watch window; add sensors only if they beat it with a CI that excludes zero | Hazard PR-AUC 0.148 vs hybrid 0.126 vs sensor-only 0.044; hybrid − hazard CI −0.054 to +0.024 |
-| First-break model | Keep only if PR-AUC beats a rotation chance null at p < 0.05, both at lead ≥ 0 and lead ≥ 10 min, and a grade-only model does not explain it | 0.061 vs base rate 0.0385 (p = 0.001); at ≥ 10 min 0.037 vs 0.024 (p = 0.014); grade-only p = 0.28 |
+| First-break model | Keep only if PR-AUC beats a rotation chance null at p < 0.05, both at lead ≥ 0 and lead ≥ 10 min, and a grade-only model does not explain it | 0.061 vs base rate 0.0385 (p = 0.001); at ≥ 10 min 0.037 vs 0.023 (p = 0.014); grade-only p = 0.28 |
 | Alarm or screen? | An alarm needs a false-alarm rate the shift accepts; otherwise it is a screening list | Sensor model at 10% alarm-on time: about 5 false alarms per shift → screening |
 | Detector label | **Holds per episode** if episode-level BH q < 0.05 and lift > 1; **one-episode artefact** if only the break-level test passes; otherwise **noise** | 0 hold; 1 artefact (`x6` level: break-level q = 0.035, covers 2 of 50 episodes, episode q = 0.58); 174 noise |
 | SHAP | Never treat a high-SHAP signal as a cause unless it also passes the detector test | 0 of the top 10 SHAP signals pass; Spearman SHAP vs lift 0.08 |
