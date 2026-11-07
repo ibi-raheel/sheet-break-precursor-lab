@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { r, f1, f2, f3, pct, pv } from './lib/data'
 import Schematic from './components/Schematic'
 import TrendStrip from './components/TrendStrip'
@@ -32,6 +32,7 @@ const STEPS = [
   { id: 'importance', short: 'Importance vs cause' },
   { id: 'alarm', short: 'Operator alarm' },
   { id: 'proof', short: 'How we know' },
+  { id: 'solution', short: 'The solution' },
 ]
 
 function useActiveStep() {
@@ -91,8 +92,15 @@ export default function App() {
         </nav>
         <main>
           <header className="mast">
+            <p className="mast-eyebrow mono"><span>{m.breaks}&nbsp;real sheet&nbsp;breaks</span> · <span>28&nbsp;days</span> · <span>{m.signals}&nbsp;sensors</span></p>
             <h1>Sheet-break precursor lab</h1>
-            <p className="mast-lede">Can a paper machine's sensors warn of a sheet break before it happens? Six steps through {m.breaks} real breaks, with the trained model next to the simple baseline at every turn.</p>
+            <p className="mast-q">With a few weeks of data and a few dozen breaks, which alarm rules can you trust?</p>
+            <ul className="mast-a">
+              <li>Breaks come in episodes: count each one once and {r.episode_level.survivors} of {r.detectors.length} sensor rules hold.</li>
+              <li>Break timing alone predicts the follow-on breaks.</li>
+              <li>Sensors help only on the first break of an episode, as a screening signal ({firstRatio.toFixed(1)}× the base rate).</li>
+            </ul>
+            <a className="mast-cta" href="#solution">Here's the playbook<span aria-hidden="true"> →</span></a>
             <p className="mast-meta mono">
               <span>RECORD 1 to 29 May</span><span>{m.signals} sensors</span><span>{m.sampling_min}-min sampling</span><span>{m.rows.toLocaleString()} rows</span>
             </p>
@@ -124,7 +132,7 @@ export default function App() {
                   <tr className="hl"><td>Hawkes, self-exciting</td><td>3</td><td>{f1(rel.hawkes.aic)}</td><td>branching ratio {f2(rel.hawkes.branching)}: about {pct(rel.hawkes.branching)} of breaks triggered by an earlier one (no CI)</td></tr>
                 </tbody>
               </table></div>
-              <p>Follow-on breaks come a median {rel.followon_since_prev_min.q50} min after the previous one; 90% within {rel.followon_since_prev_min.q90} min. A watch window of about 105 minutes after a restart covers 90% of them, with no machine learning at all.</p>
+              <p>Follow-on breaks come a median {rel.followon_since_prev_min.q50} min after the previous one; 90% within {rel.followon_since_prev_min.q90} min. A watch window of {rel.followon_since_prev_min.q90} minutes after a restart covers 90% of them, with no machine learning at all.</p>
             </>}>
             <DaySheets />
           </Step>
@@ -215,6 +223,45 @@ export default function App() {
               </ul>
             </>}>
             <EpisodeCheck />
+          </Step>
+
+          <Step n={7} id="solution" title="The solution: a first-week playbook"
+            lede="Five steps for any line with rare, clustered failures, and a tool that runs them on one CSV."
+            details={<>
+              <ol className="pb-list">
+                <li><b>Size the prize before any model.</b> Measure downtime per event from the historian (here {Math.round(r.downtime.mean_min_per_break)} min per break, {f1(r.downtime.hours_per_day)} line-hours a day) and fit the break hazard (here branching {f2(rel.hawkes.branching)}).</li>
+                <li><b>Split the events.</b> Chain breaks less than {r.episodes.gap_min / 60} h apart into episodes and label each break first-in-episode or follow-on (here {r.episodes.first_in_episode} and {r.episodes.follow_on}).</li>
+                <li><b>Follow-ons: start with no ML.</b> Trial a post-restart watch window at the 90th percentile of follow-on spacing (here {rel.followon_since_prev_min.q90} min), or the 3-parameter hazard alarm. Write down what the extra attention costs: the hazard alarm warned {Math.round(EV.hawkes.recall_follow! * 19)} of 19 holdout follow-ons but was on {pct(EV.hawkes.on_share_test)} of the time.</li>
+                <li><b>First breaks: point the sensor model only here.</b> Judge it against a rotation chance null and require at least 10 minutes of lead (here {f3(LC.sensor_gbm['5'].obs)} vs a {f3(LC.sensor_gbm['5'].prev)} base rate, p = {pv(LC.sensor_gbm['5'].p)}). Treat it as a screening signal until precision supports an alarm.</li>
+                <li><b>Detectors: score each episode once.</b> Drop rules that pass per break but fail per episode. Do not read SHAP rank as cause. Take the episode-level shortlist to the process engineer, state a false-alarm budget, and measure the share of warned breaks operators actually prevent.</li>
+              </ol>
+              <p>The tool adds no statistics of its own. It calls the pipeline functions behind steps 1 to 6 (episodes, downtime, Weibull and Hawkes fits, restart mask, rolling features, break- and episode-level permutation tests with Benjamini-Hochberg, the forward-chaining sensor model and its rotation null), and a test checks that it reproduces the numbers on this page. SOLUTION.md has the decision rules and a week-one plan.</p>
+            </>}>
+            <ol className="pb">
+              {[
+                { t: 'Size the prize', v: f1(r.downtime.hours_per_day), u: 'line-hours a day lost to breaks', c: 'var(--ink)' },
+                { t: 'Split the breaks', v: `${r.episodes.first_in_episode} / ${r.episodes.follow_on}`, u: 'first-in-episode / follow-on', c: 'var(--brk)' },
+                { t: 'Follow-ons need no ML', v: `${rel.followon_since_prev_min.q90} min`, u: 'watch window after a restart', c: 'var(--hazard)' },
+                { t: 'First breaks: sensor screen', v: `${firstRatio.toFixed(1)}×`, u: 'the base rate, judged against chance', c: 'var(--sensor)' },
+                { t: 'Count each episode once', v: `${r.episode_level.survivors} of ${r.detectors.length}`, u: 'rules hold; the shortlist goes to the process engineer', c: 'var(--ink)' },
+              ].map((p, i) => (
+                <li key={p.t} className="pb-card" style={{ '--c': p.c } as CSSProperties}>
+                  <span className="pb-n mono">{i + 1}</span>
+                  <span className="pb-t">{p.t}</span>
+                  <span className="pb-v">{p.v}</span>
+                  <span className="pb-u">{p.u}</span>
+                </li>
+              ))}
+            </ol>
+            <div className="term mono" role="figure" aria-label="Running the triage tool">
+              <div className="al-head"><span>TRIAGE · ONE CSV IN, ONE PLAYBOOK OUT</span><span>pipeline/triage.py</span></div>
+              <pre><span className="t-cmd">$ python -I pipeline/triage.py your_line.csv</span>{'\n'}
+<span className="t-k">COST     </span> {f1(r.downtime.hours_per_day)} line-hours a day lost to breaks (from timestamp gaps){'\n'}
+<span className="t-k">ROUTING  </span> {r.episodes.first_in_episode} first → sensor screening · {r.episodes.follow_on} follow-on → watch window{'\n'}
+<span className="t-k">{r.episode_level.top_break_level.id.padEnd(9)}</span> <span className="t-warn">ONE-EPISODE ARTEFACT</span>: drop{'\n'}
+<span className="t-k">VERDICT  </span> clustered: split first vs follow-on</pre>
+            </div>
+            <p className="pb-close">Built on public paper-machine data. On a real line, week one ends with this page filled in with that line's numbers.</p>
           </Step>
 
           <footer className="foot">

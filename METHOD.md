@@ -1,5 +1,11 @@
 # Method
 
+## Research question
+
+With a few weeks of line data and a few dozen rare failures, which alarm rules can you trust? And how do you tell a real precursor from one bad evening, or from a signal the model only leans on?
+
+Answered here on 124 real sheet breaks: they form 69 episodes; 1 of 175 single-sensor rules passes per break and it is one 10-hour episode, while 0 of 175 pass per episode (sections 5, 6); break history alone ranks follow-on breaks as well as any sensor model, and the sensor model's only measurable skill is on first-in-episode breaks, 1.6× the base rate, p = 0.001 (section 12); none of the top-10 SHAP signals survives (section 6). The resulting first-week playbook and the `pipeline/triage.py` tool are in SOLUTION.md.
+
 Rare-event precursor analysis on a real paper-machine sheet-break dataset. All numbers below are produced by `pipeline/run.py` and `pipeline/hybrid_run.py` (section 12) and exported to `src/data/results.json`; nothing is hand-entered.
 
 ## 1. Data
@@ -165,7 +171,7 @@ On the 86 training breaks (85 inter-break times τ, clock minutes; the interval 
 
 **Scores.** At row *t*, P(break in (t, t+h]) is `1 − S(s+h)/S(s)` for the Weibull model (s = minutes since the last break) and `1 − exp(−[μh + (α/β) E(t)(1 − e^(−βh))])` with `E(t) = Σ_{t_j ≤ t} e^(−β(t − t_j))` for Hawkes. Both use past break times only.
 
-**Operational rule (no ML).** After a break, P(another break within 2 h) = **42%** against 29% for a random 2-hour window. Follow-on breaks come a median 65 minutes after the previous one; 80% within 94 min and 90% within 103 min. A **105-minute post-restart watch window** covers 90% of follow-on breaks on the training weeks.
+**Operational rule (no ML).** After a break, P(another break within 2 h) = **42%** against 29% for a random 2-hour window. Follow-on breaks come a median 65 minutes after the previous one; 80% within 94 min and 90% within 103 min. A **103-minute post-restart watch window** covers 90% of follow-on breaks on the training weeks.
 
 ## 10. Downtime and alarm economics
 
@@ -206,7 +212,7 @@ No score pays for itself unless operators can stop a large share of the breaks t
 What these numbers say a forward-deployed data scientist should do first:
 
 1. **Day 1: measure the cost and the clustering from the historian.** Post-break downtime per break (here 20 min, 1.5 h/day) and the break hazard (here k = 0.87, branching 0.40). This sizes the prize before any model.
-2. **Trial a post-restart watch window as a zero-ML rule.** Here: after any break, run with extra attention for 105 minutes (the train-week 90th percentile of follow-on spacing). The fixed window itself was not scored on test weeks. The closest scored rule, the Hawkes hazard alarm, caught 18 of 19 test follow-on breaks at about 1.6 false alarms per shift, while staying on for 30% of operating time. Measure what the extra attention costs before rolling it out.
+2. **Trial a post-restart watch window as a zero-ML rule.** Here: after any break, run with extra attention for 103 minutes (the train-week 90th percentile of follow-on spacing). The fixed window itself was not scored on test weeks. The closest scored rule, the Hawkes hazard alarm, caught 18 of 19 test follow-on breaks at about 1.6 false alarms per shift, while staying on for 30% of operating time. Measure what the extra attention costs before rolling it out.
 3. **Point the learned model at the breaks history cannot foresee, and judge it against chance.** Boost a sensor model from the break hazard (section 12) and score it on first-in-episode breaks with a threshold-free metric and, for alarms, a chance null at the same alarm-on time. Here the sensor signal on first breaks is small (PR-AUC 1.3× to 1.6× the base rate) and the hybrid's warned-break count beats chance at only one of four budgets.
 4. **Screen detectors on first-in-episode breaks only, with an episode-aware null.** Break-level screening produced a survivor that is one bad evening; the clustered calibration shows the break-level test can produce 7 false survivors in a run.
 5. **Bring the top episode-level candidates (here `x51` level, `x26`/`x16`/`x13` deviation) to the process engineer** to name the signals and confirm on the floor, then trial one with a stated false-alarm budget and a measured *e*.

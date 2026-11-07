@@ -1,6 +1,16 @@
 # Sheet-break precursor lab
 
-Which sensor behaviours actually come before a paper-machine sheet break, and which breaks can a learned model see that break history cannot? A reproducible rare-event analysis on 124 real breaks: a hybrid model that boosts sensor corrections on top of a self-exciting break hazard, forward-looking labels with restart masking, models across lookahead horizons with honest baselines, single-signal detectors scored by lift against a permutation null, and a measured check of whether model importance (SHAP) agrees with lift.
+**The question.** With a few weeks of line data and a few dozen rare failures, which alarm rules can you trust? And how do you tell a real precursor from one bad evening, or from a signal the model only leans on?
+
+**The answer, measured on 124 real paper-machine sheet breaks:**
+- The 124 breaks were really 69 episodes. Scored one break at a time, a permutation test passed 1 of 175 sensor rules, and that rule was one 10-hour evening. Counted once per episode, none of the 175 held.
+- Break history alone (3 parameters) ranked follow-on breaks as well as any sensor model.
+- On the first break of an episode, where history has no skill, the sensor model ranked the 20-minute windows at 1.6× the base rate (p = 0.001). That makes it a screening signal, not yet an alarm.
+- None of the 10 signals the model leaned on most (SHAP) survived, and SHAP rank vs lift correlated at 0.08.
+
+**The solution:** a five-step first-week playbook and a small tool, `pipeline/triage.py`, that runs it on one CSV: it sizes the downtime, routes every break (follow-on → hazard or watch window, first-in-episode → sensor screening) and labels every candidate detector "holds per episode", "one-episode artefact" or "noise". See **[SOLUTION.md](SOLUTION.md)**.
+
+Underneath is a reproducible rare-event analysis: a hybrid model that boosts sensor corrections on top of a self-exciting break hazard, forward-looking labels with restart masking, models across lookahead horizons with honest baselines, single-signal detectors scored by lift against a permutation null, and a measured check of whether model importance (SHAP) agrees with lift.
 
 **Live demo:** _URL added after deploy_
 
@@ -29,8 +39,9 @@ On a continuous line, failures like sheet breaks are rare (124 in four weeks her
 - `pipeline/stats.py`: lift, precision, permutation p-value, Benjamini-Hochberg
 - `pipeline/reliability.py`: episodes, Weibull and Hawkes break-hazard MLE, post-break downtime, moving-block bootstrap, event-level alarm scoring, break-even model
 - `pipeline/hybrid.py`, `pipeline/hybrid_run.py`: hazard-offset LightGBM (sensor terms boosted from the Hawkes log-odds), a superposed-intensity hybrid (Hawkes excitation + sensor-learned background), a rotation chance null for first-break PR-AUC, forward-chaining episode-safe folds with purge, matched alarm-on budgets with a circular-shift chance null, first vs follow-on scoring, day-block and episode bootstrap CIs, seed check
+- `pipeline/triage.py`: first-week triage CLI over the functions above (no new statistics); see SOLUTION.md
 - `pipeline/lead_check.py`: robustness of the first-break result: PR-AUC and rotation null with only positives at least 2, 6 or 10 minutes ahead, and a grade-only model
-- `tests/`: 36 pytest tests, including hand calculations for lift, downtime, Hawkes likelihood, break-even, a matched-budget alarm and the superposed-intensity hybrid
+- `tests/`: 38 pytest tests, including a check that the triage tool reproduces the pipeline's numbers on the real data, including hand calculations for lift, downtime, Hawkes likelihood, break-even, a matched-budget alarm and the superposed-intensity hybrid
 - The web page reads the precomputed `src/data/results.json`; no API keys, no server.
 
 ## Run locally
@@ -39,6 +50,7 @@ uv venv .venv && uv pip install -r requirements.txt --python .venv/bin/python
 .venv/bin/python -I pipeline/run.py data/raw/processminer.csv src/data/results.json
 .venv/bin/python -I pipeline/hybrid_run.py data/raw/processminer.csv src/data/results.json
 .venv/bin/python -I pipeline/lead_check.py data/raw/processminer.csv src/data/results.json   # after hybrid_run
+.venv/bin/python -I pipeline/triage.py data/raw/processminer.csv --model   # the playbook card
 .venv/bin/python -I -m pytest -q tests
 npm install
 npm run dev
