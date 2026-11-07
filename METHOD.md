@@ -266,7 +266,7 @@ PR-AUC (prevalence: all 0.056, first-break subset 0.039, follow-on subset 0.019,
 | Hybrid − sensor GBM | +0.025 (−0.017 to +0.061) | −0.011 (−0.035 to +0.001) | **+0.082 (+0.003 to +0.135)** |
 | Superposed − hybrid GBM | −0.007 (−0.023 to +0.013) | −0.000 (−0.016 to +0.011) | −0.027 (−0.064 to +0.022) |
 
-In the quiet regime (≥ 2 h since the last break, 80% of test rows) the hybrid beats the hazard by +0.029 PR-AUC (CI +0.013 to +0.055) and the sensor-only GBM by +0.033 (CI +0.012 to +0.071).
+In the quiet regime (≥ 2 h since the last break, 80% of test rows) the hybrid beats the hazard by +0.029 PR-AUC (CI +0.013 to +0.055) but not the sensor-only GBM (−0.003, CI −0.026 to +0.011); the sensor-only GBM beats the hazard by +0.033 (CI +0.012 to +0.071).
 
 **First-break PR-AUC against chance** (1,000 per-block rotations of each score):
 
@@ -278,6 +278,21 @@ In the quiet regime (≥ 2 h since the last break, 80% of test rows) the hybrid 
 | Hybrid superposed | 0.050 | 0.042 (0.052) | 0.085 | 0.069 | 0.052 | 0.029 |
 
 At 60 minutes no score is above its null on first breaks (sensor GBM 0.122 vs 0.111, p = 0.14; hybrid p = 0.50).
+
+The hazard's p = 1.00 is structural, not a finding about chance: its score is highest right after a break and decays with time since it, so it ranks the post-break rows (negatives in the first-break task) above the quiet rows where first breaks happen, by construction. "No first-break skill" is the accurate reading.
+
+**Robustness of the first-break result** (`pipeline/lead_check.py`, `hybrid.lead_check` in the JSON; same folds and seed, an independent set of 1,000 rotations). The 20-minute window includes the last 2 to 8 minutes before a break, which an operator cannot act on, so first-break PR-AUC is recomputed with only positives at least *k* minutes ahead (negatives unchanged). A grade-only LightGBM (one-hot grade + x61, same settings) checks whether product grade alone explains the "sensor" skill.
+
+| Score | ≥ 2 min (all positives) | ≥ 6 min | ≥ 10 min |
+|---|---|---|---|
+| Base rate | 0.039 | 0.031 | 0.024 |
+| Hawkes hazard | 0.031 (p = 1.00) | 0.025 (p = 1.00) | 0.019 (p = 1.00) |
+| **Sensor GBM** | **0.061 (p = 0.003)** | **0.049 (p = 0.004)** | **0.037 (p = 0.014)** |
+| Hybrid GBM | 0.050 (p = 0.057) | 0.041 (p = 0.069) | 0.031 (p = 0.086) |
+| Hybrid superposed | 0.050 (p = 0.077) | 0.040 (p = 0.096) | 0.030 (p = 0.114) |
+| Grade only | 0.045 (p = 0.28) | 0.036 (p = 0.26) | 0.027 (p = 0.26) |
+
+The sensor-only model keeps its 1.6× lift with ≥ 10 minutes of lead and stays above chance; it beats the grade-only model on first breaks by +0.017 (day-block CI +0.002 to +0.045). The hybrid's first-break p is 0.049 in the main null run and 0.057 here, and it is not above chance once the last 6 or 10 minutes are excluded: its first-break skill is borderline and should not be claimed as significant.
 
 Breaks warned ≥ 10 min ahead at matched alarm-on time:
 
@@ -311,14 +326,14 @@ These recall gaps compare a flickering alarm with a blocky one at equal on-time;
 The Hawkes alarm warns fewer first breaks than its own rotated copy at every budget (p ≥ 0.98): it is on only right after breaks, and first breaks come at least 2 h after one, so it is structurally unable to reach them. Its 0 to 6 of 53 is not a chance-level reference, and the "hybrid − Hawkes" first-break recall CIs above measure that structural gap, not sensor skill. All three alarms are above their nulls on follow-on breaks at 5% to 20% (p ≤ 0.02).
 
 **Reading.**
-1. **This is where the learned model earns its place: first breaks, which history cannot foresee.** On first-in-episode breaks the hazard is below prevalence (0.031 vs 0.039) and below its own rotation null (p = 1.00): break history carries no information about when a quiet line will break. The learned sensor model ranks those 20-minute windows at 1.6× the base rate (0.061) and clearly above chance (rotation null 0.039, p = 0.001), and the same holds over all quiet-regime rows (0.076 vs 0.047, p = 0.002). The hybrid is above chance too, more weakly on first breaks (0.050, p = 0.049) and clearly on quiet rows (0.073, p = 0.003). For alarms, the hybrid's 15 of 53 warned first breaks at 10% alarm-on time is above its chance null (mean 9.7, p = 0.03), but its counts at 2%, 5% and 20% are not; the sensor-only GBM clears the null at 10% and 20%. The signal is real but small and short-range (gone at 60 minutes).
+1. **This is where the learned model earns its place: first breaks, which history cannot foresee.** On first-in-episode breaks the hazard is below prevalence (0.031 vs 0.039) and below its own rotation null (p = 1.00): break history carries no information about when a quiet line will break. The learned sensor model ranks those 20-minute windows at 1.6× the base rate (0.061) and clearly above chance (rotation null 0.039, p = 0.001), and the same holds over all quiet-regime rows (0.076 vs 0.047, p = 0.002). The hybrid is clearly above chance on quiet rows (0.073, p = 0.003) but only borderline on first breaks (0.050, p = 0.049 in one null run, 0.057 in an independent one, and not significant with ≥ 6 or ≥ 10 minutes of lead); the robust first-break evidence is the sensor-only model's, which holds at ≥ 10 minutes of lead (p = 0.014) and is not explained by grade alone. For alarms, the hybrid's 15 of 53 warned first breaks at 10% alarm-on time is above its chance null (mean 9.7, p = 0.03), but its counts at 2%, 5% and 20% are not; the sensor-only GBM clears the null at 10% and 20%. The signal is real but small and short-range (gone at 60 minutes).
 2. **For follow-on breaks the hazard suffices.** The hybrid ties it (difference CI spans zero), and the sensor-only GBM is far worse there (0.044 vs 0.148). Sensors add nothing measurable once the line is in an episode.
-3. **The hybrid is the best single score on point estimates, not a proven winner.** It is the only score whose all-break PR-AUC beats the hazard with a CI excluding zero (+0.019, CI +0.002 to +0.043, lower end near zero), and it has the highest all-break point estimate; its edge over the sensor-only GBM on all breaks is not significant (+0.025, CI −0.017 to +0.061). It gets there because it keeps the hazard's follow-on skill (+0.082 over sensor-only on follow-ons) while adding most of the sensor lift on first breaks (it gives back 0.011 to the sensor-only GBM there, CI −0.035 to +0.001).
+3. **The hybrid is the best single score on point estimates, not a proven winner.** It is the only score whose all-break PR-AUC beats the hazard with a CI excluding zero (+0.019, CI +0.002 to +0.043, lower end near zero), and it has the highest all-break point estimate; its edge over the sensor-only GBM on all breaks is not significant (+0.025, CI −0.017 to +0.061). It gets there because it keeps the hazard's follow-on skill (+0.082 over sensor-only on follow-ons) while adding most of the sensor lift on first breaks (it gives back 0.011 to the sensor-only GBM there, CI −0.035 to +0.001). Across seeds 11, 12, 13 its all-break PR-AUC is 0.121 / 0.119 / 0.127; the CI was computed for seed 11 only.
 4. **Superposing a sensor-learned background on the Hawkes excitation does not beat boosting from the log-odds** (all-break PR-AUC 0.114 vs 0.121, difference CI −0.023 to +0.013; first breaks tie at 0.050). Training the sensor term only on quiet rows did not buy extra first-break skill over the sensor-only GBM (−0.011, CI −0.039 to +0.004). Kept as a reported negative result.
 5. **Seed check:** hybrid PR-AUC on all breaks 0.121 / 0.119 / 0.127 and on first breaks 0.050 / 0.051 / 0.050 over seeds 11, 12, 13; superposed hybrid on first breaks 0.050 / 0.050 / 0.056.
 
 **What does not win (reported, not hidden).**
-- **Absolute first-break skill is low:** PR-AUC 0.050 against a 0.039 prevalence (1.3×); 0.061 (1.6×) for the sensor-only model. Above chance is not the same as useful. At 10% alarm-on time the hybrid catches 28% of first breaks but raises about 5 rising-edge false alarms per shift. That is a screening signal for a process engineer, not an operator alarm.
+- **Absolute first-break skill is low:** PR-AUC 0.050 against a 0.039 prevalence (1.3×, not robustly above chance); 0.061 (1.6×) for the sensor-only model. Above chance is not the same as useful. At 10% alarm-on time the hybrid catches 28% of first breaks but raises about 5 rising-edge false alarms per shift. That is a screening signal for a process engineer, not an operator alarm.
 - **False-alarm counts favour the hazard** at every budget (0.4 to 0.9 per shift against 2.9 to 8.4): its alarm is one long block after each break, the sensor alarms flicker. Matched on-time and matched alarm count give opposite pictures; section 10 showed the other one.
 - **At 60 minutes the hazard wins overall** (PR-AUC 0.276 vs hybrid 0.219 vs sensor GBM 0.168) and the first-break lift is no longer significant (hybrid − Hawkes +0.011, CI −0.007 to +0.037). The hybrid's follow-on PR-AUC falls well below the hazard's (0.220 vs 0.476): at the longer horizon the learned corrections overfit and damage the hazard. The sensor signal is short-range.
 - **Matched alarm-on time favours flickering alarms.** A row-iid random score at 10% on-time warns about 25 of 53 first breaks, more than any model; the model counts only mean something against the rotation null above. Of the 8 first-break alarm comparisons (2 learned models × 4 budgets) 3 clear it at p < 0.05, with no multiplicity correction; 10% is the budget where both do.
@@ -335,5 +350,6 @@ uv venv .venv && uv pip install -r requirements.txt --python .venv/bin/python
 export OMP_NUM_THREADS=2
 .venv/bin/python -I pipeline/run.py data/raw/processminer.csv src/data/results.json   # ~55 s
 .venv/bin/python -I pipeline/hybrid_run.py data/raw/processminer.csv src/data/results.json   # ~6 min, adds the `hybrid` section
+.venv/bin/python -I pipeline/lead_check.py data/raw/processminer.csv src/data/results.json   # run after hybrid_run (which rewrites `hybrid`); adds `hybrid.lead_check`
 .venv/bin/python -I -m pytest -q tests
 ```
