@@ -320,6 +320,7 @@ input[type='range']::-moz-range-thumb { width: 10px; height: 18px; border-radius
 .foot { margin-top: 96px; padding-top: 18px; border-top: 1.5px solid var(--ink); font-size: 13.5px; color: var(--ink-2); max-width: 46em; }
 .foot p { margin: 0 0 10px; }
 .foot-sign { font: 600 20px/1.2 var(--cond); letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink); margin-top: 18px !important; }
+.foot-src { font: 500 12px/1.4 var(--mono); letter-spacing: 0.02em; color: var(--ink-2); }
 
 @media (max-width: 640px) {
   body { font-size: 16px; }

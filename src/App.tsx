@@ -265,8 +265,9 @@ export default function App() {
           </Step>
 
           <footer className="foot">
-            <p>Data: Ranjan, Reddy, Mustonen, Paynabar and Pourak (2018), <a href="https://arxiv.org/abs/1809.10717">Rare Event Classification in Multivariate Time Series</a>, arXiv:1809.10717. Licence CC BY-NC-SA 4.0; derived results are shared under the same licence and the raw data is not redistributed. Results are precomputed by the pipeline in this repository; nothing here calls a live model.</p>
+            <p>Data: Ranjan, Reddy, Mustonen, Paynabar and Pourak (2018), <a href="https://arxiv.org/abs/1809.10717">Rare Event Classification in Multivariate Time Series</a>, arXiv:1809.10717. Licence CC BY-NC-SA 4.0; derived results are shared under the same licence and the raw data is not redistributed. Results are precomputed by the pipeline in <a href="https://github.com/ibi-raheel/sheet-break-precursor-lab">the GitHub repository</a>; nothing here calls a live model.</p>
             <p className="foot-sign">More work at <a href="https://ibiraheel.com">ibiraheel.com</a></p>
+            <p className="foot-src"><a href="https://github.com/ibi-raheel/sheet-break-precursor-lab">Source on GitHub</a></p>
           </footer>
         </main>
       </div>
